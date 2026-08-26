@@ -528,6 +528,10 @@ export const useSessionStore = defineStore('session', () => {
           elicitation: {
             url: {},
           },
+          // Terminal execution requires a local subprocess, so only desktop
+          // advertises it. Enables agents to run commands (ls, grep, git, …)
+          // and manipulate files beyond fs read/write.
+          terminal: canAccessFs,
         },
         clientInfo: {
           name: 'acp-ui',
@@ -738,6 +742,10 @@ export const useSessionStore = defineStore('session', () => {
           elicitation: {
             url: {},
           },
+          // Terminal execution requires a local subprocess, so only desktop
+          // advertises it. Enables agents to run commands (ls, grep, git, …)
+          // and manipulate files beyond fs read/write.
+          terminal: canAccessFs,
         },
         clientInfo: {
           name: 'acp-ui',
