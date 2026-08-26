@@ -8,12 +8,6 @@ A modern, cross-platform client for the [Agent Client Protocol (ACP)](https://ag
 
 ![ACP UI Screenshot](assets/screenshot.png)
 
-## 🌍 Try it in your browser
-
-No install required — open **[https://acp-ui.github.io/](https://acp-ui.github.io/)** and connect to a remote ACP agent over WebSocket. The web build supports the same chat, sessions, permissions, and traffic-monitor features as the desktop and mobile apps; it only omits local stdio agents and host filesystem access (which require a local subprocess and aren't available in a browser tab).
-
-> Pages served over HTTPS can only open `wss://` URLs (browser mixed-content rule). For LAN `ws://` access, run the bundle locally (`npm run preview:web`) or use a `wss://` tunnel — see [Connecting from your phone or browser](#-connecting-from-your-phone-or-browser), the same setup works for the web build.
-
 ## 🔧 About this fork
 
 This is a community fork of [`formulahendry/acp-ui`](https://github.com/formulahendry/acp-ui) that ships fixes which haven't been merged upstream yet. Several community pull requests have sat open on the original repository for months without being reviewed or accepted, so we maintain this fork — and host its own web build — for anyone who wants those fixes today.
@@ -25,6 +19,12 @@ Every fix here is also proposed back to the upstream project; the fork just make
 ### Fixes in this fork
 
 - **The auth dialog now opens the device-authorization link.** In the upstream build, the *"Authentication Required"* dialog printed the device-auth URL as plain text — clicking a method simply closed the dialog, so you had to copy the link by hand and paste it into another tab. In this fork, clicking a method opens its login URL in a new tab while closing the dialog, the URL is rendered as a clickable link, and a **Copy code** button copies the device `user_code` to your clipboard. Also submitted upstream as [#18](https://github.com/formulahendry/acp-ui/pull/18).
+
+## 🌍 Try it in your browser
+
+No install required — open **[https://acp-ui.github.io/](https://acp-ui.github.io/)** and connect to a remote ACP agent over WebSocket. The web build supports the same chat, sessions, permissions, and traffic-monitor features as the desktop and mobile apps; it only omits local stdio agents and host filesystem access (which require a local subprocess and aren't available in a browser tab).
+
+> Pages served over HTTPS can only open `wss://` URLs (browser mixed-content rule). For LAN `ws://` access, run the bundle locally (`npm run preview:web`) or use a `wss://` tunnel — see [Connecting from your phone or browser](#-connecting-from-your-phone-or-browser), the same setup works for the web build.
 
 ## 📥 Installation
 
