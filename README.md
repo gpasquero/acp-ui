@@ -19,6 +19,7 @@ Every fix here is also proposed back to the upstream project; the fork just make
 ### Fixes in this fork
 
 - **The auth dialog now opens the device-authorization link.** In the upstream build, the *"Authentication Required"* dialog printed the device-auth URL as plain text — clicking a method simply closed the dialog, so you had to copy the link by hand and paste it into another tab. In this fork, clicking a method opens its login URL in a new tab while closing the dialog, the URL is rendered as a clickable link, and a **Copy code** button copies the device `user_code` to your clipboard. Also submitted upstream as [#18](https://github.com/formulahendry/acp-ui/pull/18).
+- **Default working directory.** Starting a session no longer errors out when the *Working Directory* field is empty. It's prefilled with a sensible default (`/tmp`) and falls back to it on submit, which removes needless friction for remote agents (the `cwd` is interpreted on the agent's host). Absolute-path validation still applies and the desktop folder picker still overrides it. Also submitted upstream as [#19](https://github.com/formulahendry/acp-ui/pull/19).
 
 ## 🌍 Try it in your browser
 
