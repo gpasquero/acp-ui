@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ElicitationRequest, ElicitationAction } from '../lib/types';
+import { openExternalUrl } from '../lib/host';
 
 defineProps<{
   elicitation: ElicitationRequest;
@@ -31,9 +32,10 @@ function toSegments(text: string): Segment[] {
   return segments;
 }
 
-/** Open the authorization URL in a new tab without dismissing the dialog. */
+/** Open the authorization URL in the system browser (Tauri) or a new tab
+ * (web), without dismissing the dialog. */
 function openUrl(url: string) {
-  window.open(url, '_blank', 'noopener,noreferrer');
+  void openExternalUrl(url);
 }
 </script>
 
@@ -54,6 +56,7 @@ function openUrl(url: string) {
               class="msg-link"
               target="_blank"
               rel="noopener noreferrer"
+              @click.prevent="openUrl(seg.value)"
             >{{ seg.value }}</a>
             <template v-else>{{ seg.value }}</template>
           </template>
