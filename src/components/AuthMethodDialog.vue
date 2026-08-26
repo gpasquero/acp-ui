@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import type { AuthMethod } from '@agentclientprotocol/sdk';
+import { openExternalUrl } from '../lib/host';
 
 defineProps<{
   authMethods: AuthMethod[];
@@ -18,7 +19,8 @@ function handleSelect(method: AuthMethod) {
   // expect from the device-authorization instructions.
   const url = extractUrl(method.description);
   if (url) {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    // Host-aware: system browser on Tauri desktop, new tab on web.
+    void openExternalUrl(url);
   }
   emit('select', method.id);
 }
