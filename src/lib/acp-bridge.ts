@@ -366,8 +366,17 @@ export class AcpClientBridge implements Client {
     await this.sendRequest('session/set_mode', params);
   }
 
-  async unstable_setSessionModel(params: { sessionId: string; modelId: string }): Promise<void> {
-    await this.sendRequest('session/set_model', params);
+  /**
+   * Set a session config option (SDK 1.3.0). The model picker rides on this:
+   * the model is a `select` config option, changed via `session/set_config_option`.
+   * `unstable_` because the config-options API is not part of the stable spec.
+   */
+  async unstable_setSessionConfigOption(params: {
+    sessionId: string;
+    configId: string;
+    value: string | boolean;
+  }): Promise<void> {
+    await this.sendRequest('session/set_config_option', params);
   }
 
   async authenticate(params: AuthenticateRequest): Promise<AuthenticateResponse> {

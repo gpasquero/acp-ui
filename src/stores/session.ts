@@ -10,7 +10,7 @@ import { AcpClientBridge, createAcpClient } from '../lib/acp-bridge';
 import { onAgentStderr, spawnAgent, killAgent } from '../lib/host';
 import { isDesktop } from '../lib/platform';
 import { useConfigStore } from './config';
-import type { SessionNotification, AuthMethod } from '@agentclientprotocol/sdk';
+import type { SessionNotification, AuthMethod, SessionConfigOption, LoadSessionResponse } from '@agentclientprotocol/sdk';
 
 const STORE_PATH = 'sessions.json';
 const PROTOCOL_VERSION = 1;
@@ -34,6 +34,82 @@ function detectPhase(line: string): string | null {
     return 'starting';
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Session config options (SDK 1.3.0) — model picker plumbing.
+//
+// SDK 1.3.0 dropped `NewSessionResponse.models` in favour of a generic
+// `configOptions` list. The model selector is the `select` option the agent
+// tags with `category: "model"`. These helpers extract it into the shape the
+// existing ModelPicker already understands. All parsing is defensive: any
+// unexpected shape yields `null`, which simply hides the picker.
+// ---------------------------------------------------------------------------
+
+interface ModelConfig {
+  /** The config option's id, sent back as `configId` on set_config_option. */
+  configId: string;
+  models: ModelInfo[];
+  currentModelId: string;
+}
+
+/** True for a string that names the model selector but not model *params*. */
+function namesModel(s: unknown): boolean {
+  return typeof s === 'string' && /model/i.test(s) && !/model[_-]?config/i.test(s);
+}
+
+/** Flatten a select option's values, tolerating both flat and grouped forms. */
+function flattenSelectOptions(options: unknown): ModelInfo[] {
+  if (!Array.isArray(options)) return [];
+  const out: ModelInfo[] = [];
+  for (const opt of options) {
+    if (!opt || typeof opt !== 'object') continue;
+    const o = opt as Record<string, unknown>;
+    if (Array.isArray(o.options)) {
+      // Grouped: recurse into the group's options.
+      out.push(...flattenSelectOptions(o.options));
+    } else if (typeof o.value === 'string') {
+      out.push({
+        modelId: o.value,
+        name: typeof o.name === 'string' ? o.name : o.value,
+        description: typeof o.description === 'string' ? o.description : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Find the model selector among the session's config options and map it to the
+ * ModelPicker's shape. Prefers `category: "model"`; falls back to a select
+ * whose category/id/name names "model" (excluding "model_config").
+ */
+function parseModelConfig(configOptions: SessionConfigOption[] | null | undefined): ModelConfig | null {
+  if (!Array.isArray(configOptions)) return null;
+  const selects = configOptions.filter(
+    (o): o is SessionConfigOption & { type: 'select' } =>
+      !!o && typeof o === 'object' && (o as { type?: unknown }).type === 'select'
+  );
+  const modelOpt =
+    selects.find((o) => (o as { category?: unknown }).category === 'model') ??
+    selects.find((o) => {
+      const c = o as { category?: unknown; id?: unknown; name?: unknown };
+      return namesModel(c.category) || namesModel(c.id) || namesModel(c.name);
+    });
+  if (!modelOpt) return null;
+  const opt = modelOpt as unknown as {
+    id?: unknown;
+    currentValue?: unknown;
+    options?: unknown;
+  };
+  if (typeof opt.id !== 'string') return null;
+  const models = flattenSelectOptions(opt.options);
+  if (models.length === 0) return null;
+  return {
+    configId: opt.id,
+    models,
+    currentModelId: typeof opt.currentValue === 'string' ? opt.currentValue : '',
+  };
 }
 
 export const useSessionStore = defineStore('session', () => {
@@ -84,6 +160,24 @@ export const useSessionStore = defineStore('session', () => {
   // Current ACP client
   let acpClient: AcpClientBridge | null = null;
   let store: KVStore | null = null;
+  // Config option id of the model selector (SDK 1.3.0), needed to change it.
+  let modelConfigId: string | null = null;
+
+  // Populate the model picker from a session's config options (create/resume
+  // responses and `config_option_update` notifications). Clears when there's
+  // no recognisable model selector.
+  function applyConfigOptions(configOptions: SessionConfigOption[] | null | undefined): void {
+    const modelConfig = parseModelConfig(configOptions);
+    if (modelConfig) {
+      modelConfigId = modelConfig.configId;
+      availableModels.value = modelConfig.models;
+      currentModelId.value = modelConfig.currentModelId;
+    } else {
+      modelConfigId = null;
+      availableModels.value = [];
+      currentModelId.value = '';
+    }
+  }
 
   // Computed
   const hasActiveSession = computed(() => currentSession.value !== null);
@@ -239,6 +333,14 @@ export const useSessionStore = defineStore('session', () => {
         // Agent changed the mode
         if ('modeId' in update && update.modeId) {
           currentModeId.value = update.modeId as string;
+        }
+        break;
+
+      case 'config_option_update':
+        // SDK 1.3.0: the agent pushed the full set of config options (e.g. the
+        // model changed). Re-derive the model picker from it.
+        if ('configOptions' in update) {
+          applyConfigOptions((update as { configOptions?: SessionConfigOption[] }).configOptions);
         }
         break;
 
@@ -532,12 +634,8 @@ export const useSessionStore = defineStore('session', () => {
         currentModeId.value = '';
       }
 
-      // Session models: SDK 1.3.0 dropped the dedicated `models` field on
-      // NewSessionResponse in favour of the generic `configOptions` (session
-      // config options). The model picker is disabled until it's migrated to
-      // that API; see follow-up. Clearing keeps the picker hidden.
-      availableModels.value = [];
-      currentModelId.value = '';
+      // Model picker (SDK 1.3.0): derived from the session's config options.
+      applyConfigOptions(sessionResponse.configOptions);
 
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
@@ -656,8 +754,9 @@ export const useSessionStore = defineStore('session', () => {
       toolCalls.value.clear();
 
       // Try to load existing session - may fail with auth_required
+      let loadResponse: LoadSessionResponse | undefined;
       try {
-        await acpClient.loadSession({
+        loadResponse = await acpClient.loadSession({
           sessionId: savedSession.sessionId,
           cwd: savedSession.cwd,
           mcpServers: [],
@@ -686,7 +785,7 @@ export const useSessionStore = defineStore('session', () => {
           console.log('Authentication successful:', authResponse);
 
           // Retry loading session after auth
-          await acpClient.loadSession({
+          loadResponse = await acpClient.loadSession({
             sessionId: savedSession.sessionId,
             cwd: savedSession.cwd,
             mcpServers: [],
@@ -695,6 +794,11 @@ export const useSessionStore = defineStore('session', () => {
           throw sessionError;
         }
       }
+
+      // Model picker (SDK 1.3.0): populate from the resumed session's config
+      // options if the agent returned them. Live changes still arrive via
+      // config_option_update notifications during replay.
+      applyConfigOptions(loadResponse?.configOptions);
 
       currentSession.value = savedSession;
       isConnected.value = true;
@@ -861,6 +965,7 @@ export const useSessionStore = defineStore('session', () => {
     availableCommands.value = [];
     availableModels.value = [];
     currentModelId.value = '';
+    modelConfigId = null;
   }
 
   // Delete saved session
@@ -889,13 +994,19 @@ export const useSessionStore = defineStore('session', () => {
     if (!acpClient || !currentSession.value) {
       throw new Error('No active session');
     }
-    
-    await acpClient.unstable_setSessionModel({
+    if (!modelConfigId) {
+      throw new Error('No model config option available for this session');
+    }
+
+    // SDK 1.3.0: the model is a session config option, changed via
+    // session/set_config_option (configId = the model option's id).
+    await acpClient.unstable_setSessionConfigOption({
       sessionId: currentSession.value.sessionId,
-      modelId,
+      configId: modelConfigId,
+      value: modelId,
     });
-    
-    // Optimistically update the current model
+
+    // Optimistically update; a config_option_update may confirm/override.
     currentModelId.value = modelId;
   }
 
