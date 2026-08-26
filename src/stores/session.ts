@@ -4,7 +4,7 @@ import { ref, computed, watch } from 'vue';
 import { loadKvStore, type KVStore } from '../lib/host/storage';
 import { getAppVersion } from '../lib/host';
 import { trackEvent, trackError } from '../lib/telemetry';
-import type { SavedSession, ChatMessage, ToolCallInfo, PermissionRequest, SessionMode, SlashCommand, ModelInfo, AgentConfig } from '../lib/types';
+import type { SavedSession, ChatMessage, ToolCallInfo, PermissionRequest, SessionMode, SlashCommand, ModelInfo, AgentConfig, ElicitationRequest, ElicitationAction } from '../lib/types';
 import { getTransportKind } from '../lib/types';
 import { AcpClientBridge, createAcpClient } from '../lib/acp-bridge';
 import { onAgentStderr, spawnAgent, killAgent } from '../lib/host';
@@ -52,6 +52,8 @@ export const useSessionStore = defineStore('session', () => {
   const isReconnecting = ref(false);
   const error = ref<string | null>(null);
   const pendingPermission = ref<PermissionRequest | null>(null);
+  // URL-mode elicitation currently awaiting the user (or auto-completion).
+  const pendingElicitation = ref<ElicitationRequest | null>(null);
   
   // Authentication state
   const pendingAuthMethods = ref<AuthMethod[]>([]);
@@ -127,6 +129,7 @@ export const useSessionStore = defineStore('session', () => {
     isConnected.value = false;
     isLoading.value = false;
     pendingPermission.value = null;
+    pendingElicitation.value = null;
     error.value = `Connection lost: ${reason ?? 'transport closed'}`;
   }
 
@@ -388,6 +391,16 @@ export const useSessionStore = defineStore('session', () => {
         { immediate: true }
       );
 
+      // Sync bridge's pendingElicitation to the store so the UI can show the
+      // URL-mode authorization dialog.
+      watch(
+        () => acpClient?.pendingElicitation.value,
+        (newValue) => {
+          pendingElicitation.value = newValue ?? null;
+        },
+        { immediate: true }
+      );
+
       if (connectionAborted) {
         await acpClient.disconnect();
         throw new Error('Connection cancelled');
@@ -406,6 +419,12 @@ export const useSessionStore = defineStore('session', () => {
           fs: {
             readTextFile: canAccessFs,
             writeTextFile: canAccessFs,
+          },
+          // Advertise URL-mode elicitation so agents (e.g. GlobAI) can drive
+          // tool authorization (3LO) via elicitation/create instead of getting
+          // a METHOD_NOT_FOUND. `unstable_` in the SDK; wire field is `url`.
+          elicitation: {
+            url: {},
           },
         },
         clientInfo: {
@@ -513,18 +532,12 @@ export const useSessionStore = defineStore('session', () => {
         currentModeId.value = '';
       }
 
-      // Set up session models if available
-      if (sessionResponse.models) {
-        availableModels.value = (sessionResponse.models.availableModels || []).map(m => ({
-          modelId: m.modelId,
-          name: m.name,
-          description: m.description ?? undefined,
-        }));
-        currentModelId.value = sessionResponse.models.currentModelId || '';
-      } else {
-        availableModels.value = [];
-        currentModelId.value = '';
-      }
+      // Session models: SDK 1.3.0 dropped the dedicated `models` field on
+      // NewSessionResponse in favour of the generic `configOptions` (session
+      // config options). The model picker is disabled until it's migrated to
+      // that API; see follow-up. Clearing keeps the picker hidden.
+      availableModels.value = [];
+      currentModelId.value = '';
 
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
@@ -599,6 +612,16 @@ export const useSessionStore = defineStore('session', () => {
         { immediate: true }
       );
 
+      // Sync bridge's pendingElicitation to the store so the UI can show the
+      // URL-mode authorization dialog.
+      watch(
+        () => acpClient?.pendingElicitation.value,
+        (newValue) => {
+          pendingElicitation.value = newValue ?? null;
+        },
+        { immediate: true }
+      );
+
       // Only Tauri desktop has real filesystem access; mobile and web
       // cannot fulfil readTextFile / writeTextFile RPCs.
       const canAccessFs = isDesktop();
@@ -610,6 +633,12 @@ export const useSessionStore = defineStore('session', () => {
           fs: {
             readTextFile: canAccessFs,
             writeTextFile: canAccessFs,
+          },
+          // Advertise URL-mode elicitation so agents (e.g. GlobAI) can drive
+          // tool authorization (3LO) via elicitation/create instead of getting
+          // a METHOD_NOT_FOUND. `unstable_` in the SDK; wire field is `url`.
+          elicitation: {
+            url: {},
           },
         },
         clientInfo: {
@@ -794,6 +823,15 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  // Answer a URL-mode elicitation (accept / decline / cancel). The bridge
+  // clears its own pending ref; the watch propagates that to the store.
+  function resolveElicitation(action: ElicitationAction): void {
+    if (acpClient) {
+      acpClient.resolveElicitation(action);
+    }
+    pendingElicitation.value = null;
+  }
+
   // Disconnect current session
   async function disconnect(): Promise<void> {
     const agentName = currentSession.value?.agentName || 'unknown';
@@ -816,6 +854,8 @@ export const useSessionStore = defineStore('session', () => {
     isConnected.value = false;
     messages.value = [];
     toolCalls.value.clear();
+    pendingPermission.value = null;
+    pendingElicitation.value = null;
     availableModes.value = [];
     currentModeId.value = '';
     availableCommands.value = [];
@@ -927,6 +967,7 @@ export const useSessionStore = defineStore('session', () => {
     isReconnecting,
     error,
     pendingPermission,
+    pendingElicitation,
     pendingAuthMethods,
     pendingAuthAgentName,
     availableModes,
@@ -953,6 +994,7 @@ export const useSessionStore = defineStore('session', () => {
     cancelConnection,
     resolvePermission,
     cancelPermission,
+    resolveElicitation,
     selectAuthMethod,
     cancelAuthSelection,
     disconnect,
