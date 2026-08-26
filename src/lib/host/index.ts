@@ -344,6 +344,70 @@ export async function writeTextFile(path: string, content: string): Promise<void
 }
 
 // ---------------------------------------------------------------------------
+// Terminal RPCs (Tauri desktop only). Back the ACP `terminal/*` capability by
+// spawning/managing processes in the Rust backend.
+// ---------------------------------------------------------------------------
+
+export interface TerminalExitStatus {
+  exitCode?: number | null;
+  signal?: string | null;
+}
+
+export interface TerminalOutputResult {
+  output: string;
+  truncated: boolean;
+  exitStatus?: TerminalExitStatus | null;
+}
+
+export interface CreateTerminalOptions {
+  command: string;
+  args?: string[];
+  env?: { name: string; value: string }[];
+  cwd?: string | null;
+  outputByteLimit?: number | null;
+}
+
+function throwNoTerminal(): never {
+  throw new Error('terminal is not supported on this platform');
+}
+
+export async function terminalCreate(opts: CreateTerminalOptions): Promise<string> {
+  if (!isTauriHost()) throwNoTerminal();
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('terminal_create', {
+    command: opts.command,
+    args: opts.args ?? [],
+    env: opts.env ?? [],
+    cwd: opts.cwd ?? null,
+    outputByteLimit: opts.outputByteLimit ?? null,
+  });
+}
+
+export async function terminalOutput(terminalId: string): Promise<TerminalOutputResult> {
+  if (!isTauriHost()) throwNoTerminal();
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<TerminalOutputResult>('terminal_output', { terminalId });
+}
+
+export async function terminalWaitForExit(terminalId: string): Promise<TerminalExitStatus> {
+  if (!isTauriHost()) throwNoTerminal();
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<TerminalExitStatus>('terminal_wait_for_exit', { terminalId });
+}
+
+export async function terminalKill(terminalId: string): Promise<void> {
+  if (!isTauriHost()) throwNoTerminal();
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<void>('terminal_kill', { terminalId });
+}
+
+export async function terminalRelease(terminalId: string): Promise<void> {
+  if (!isTauriHost()) throwNoTerminal();
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<void>('terminal_release', { terminalId });
+}
+
+// ---------------------------------------------------------------------------
 // Re-exports
 // ---------------------------------------------------------------------------
 

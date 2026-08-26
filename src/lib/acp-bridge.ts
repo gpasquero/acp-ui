@@ -25,8 +25,26 @@ import type {
   CreateElicitationRequest,
   CreateElicitationResponse,
   CompleteElicitationNotification,
+  CreateTerminalRequest,
+  CreateTerminalResponse,
+  TerminalOutputRequest,
+  TerminalOutputResponse,
+  WaitForTerminalExitRequest,
+  WaitForTerminalExitResponse,
+  KillTerminalRequest,
+  KillTerminalResponse,
+  ReleaseTerminalRequest,
+  ReleaseTerminalResponse,
 } from '@agentclientprotocol/sdk';
-import { readTextFile as hostReadTextFile, writeTextFile as hostWriteTextFile } from './host';
+import {
+  readTextFile as hostReadTextFile,
+  writeTextFile as hostWriteTextFile,
+  terminalCreate,
+  terminalOutput,
+  terminalWaitForExit,
+  terminalKill,
+  terminalRelease,
+} from './host';
 import type { AcpTransport, Unsubscribe } from './transport/types';
 import { createTransport } from './transport';
 import type {
@@ -64,6 +82,9 @@ export class AcpClientBridge implements Client {
    * error so a misbehaving agent can't hang waiting for a response.
    */
   private fsAvailable: boolean;
+  /** Terminal RPCs (`terminal/*`) require a desktop subprocess, so they are
+   * only handled on Tauri desktop; elsewhere they respond method-not-found. */
+  private terminalAvailable: boolean;
   private messageResolvers: Map<number, (response: unknown) => void> = new Map();
   private messageRejecters: Map<number, (error: Error) => void> = new Map();
   private pendingMethods: Map<number, string> = new Map(); // Track method names for responses
@@ -93,6 +114,7 @@ export class AcpClientBridge implements Client {
     // Default: fs is available iff we are on Tauri desktop. Callers (e.g.
     // remote agents that trust the host fs) can override.
     this.fsAvailable = options?.fsAvailable ?? hasLocalFs();
+    this.terminalAvailable = hasLocalFs();
     this.unlistenMessage = this.transport.onMessage((msg) => this.handleMessage(msg));
     this.unlistenClose = this.transport.onClose((reason) => {
       // Reject all in-flight requests so callers stop hanging.
@@ -238,6 +260,17 @@ export class AcpClientBridge implements Client {
           break;
         case 'elicitation/create':
           result = await this.createElicitation(params as CreateElicitationRequest);
+          break;
+        case 'terminal/create':
+        case 'terminal/output':
+        case 'terminal/wait_for_exit':
+        case 'terminal/kill':
+        case 'terminal/release':
+          if (!this.terminalAvailable) {
+            error = { code: JSONRPC_METHOD_NOT_FOUND, message: `${method} not available on this client` };
+          } else {
+            result = await this.handleTerminal(method, params);
+          }
           break;
         default:
           error = { code: JSONRPC_METHOD_NOT_FOUND, message: `Method not found: ${method}` };
@@ -482,6 +515,56 @@ export class AcpClientBridge implements Client {
     const pending = this.pendingElicitation.value;
     if (pending && pending.elicitationId === params.elicitationId) {
       this.resolveElicitation('accept');
+    }
+  }
+
+  /**
+   * Handle the ACP `terminal/*` RPCs by delegating to the Tauri backend
+   * (desktop only; the caller has already checked `terminalAvailable`). The
+   * agent uses these to run commands on the user's machine and read output.
+   */
+  private async handleTerminal(method: string, params: unknown): Promise<unknown> {
+    switch (method) {
+      case 'terminal/create': {
+        const p = params as CreateTerminalRequest;
+        const terminalId = await terminalCreate({
+          command: p.command,
+          args: p.args ?? [],
+          env: (p.env ?? []).map((e) => ({ name: e.name, value: e.value })),
+          cwd: p.cwd ?? null,
+          outputByteLimit: (p as { outputByteLimit?: number | null }).outputByteLimit ?? null,
+        });
+        return { terminalId } as CreateTerminalResponse;
+      }
+      case 'terminal/output': {
+        const p = params as TerminalOutputRequest;
+        const res = await terminalOutput(p.terminalId);
+        return {
+          output: res.output,
+          truncated: res.truncated,
+          exitStatus: res.exitStatus ?? undefined,
+        } as TerminalOutputResponse;
+      }
+      case 'terminal/wait_for_exit': {
+        const p = params as WaitForTerminalExitRequest;
+        const status = await terminalWaitForExit(p.terminalId);
+        return {
+          exitCode: status.exitCode ?? undefined,
+          signal: status.signal ?? undefined,
+        } as WaitForTerminalExitResponse;
+      }
+      case 'terminal/kill': {
+        const p = params as KillTerminalRequest;
+        await terminalKill(p.terminalId);
+        return {} as KillTerminalResponse;
+      }
+      case 'terminal/release': {
+        const p = params as ReleaseTerminalRequest;
+        await terminalRelease(p.terminalId);
+        return {} as ReleaseTerminalResponse;
+      }
+      default:
+        throw new Error(`Unhandled terminal method: ${method}`);
     }
   }
 
