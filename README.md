@@ -16,6 +16,28 @@ This is a community fork of [`formulahendry/acp-ui`](https://github.com/formulah
 
 Every fix here is also proposed back to the upstream project; the fork just makes them usable right now.
 
+### Install the desktop app (this fork's builds)
+
+Prebuilt desktop packages with these fixes are published on this fork's releases:
+
+**[⬇️ Download the latest release](https://github.com/gpasquero/acp-ui/releases/latest)**
+
+| Platform | Package |
+|----------|---------|
+| **macOS (Apple Silicon)** | `.dmg` (aarch64) |
+| **macOS (Intel)** | `.dmg` (x64) |
+| **Windows** | `.msi` (installer) or `.exe` (NSIS) |
+| **Linux x64 / ARM64** | `.deb`, `.rpm`, or `.AppImage` |
+| **Android** | `.apk` (sideload) |
+
+**macOS first launch:** these builds are ad-hoc signed but **not** notarized (no paid Apple Developer account), so macOS shows *"Apple could not verify acp-ui is free of malware."* — the app isn't damaged. Run once after installing:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/acp-ui.app
+```
+
+Then open it normally. (Alternatively: **System Settings → Privacy & Security → Open Anyway**.) This is the same Gatekeeper caveat as the upstream builds.
+
 ### Fixes in this fork
 
 - **The auth dialog now opens the device-authorization link.** In the upstream build, the *"Authentication Required"* dialog printed the device-auth URL as plain text — clicking a method simply closed the dialog, so you had to copy the link by hand and paste it into another tab. In this fork, clicking a method opens its login URL in a new tab while closing the dialog, the URL is rendered as a clickable link, and a **Copy code** button copies the device `user_code` to your clipboard. Also submitted upstream as [#18](https://github.com/formulahendry/acp-ui/pull/18).
